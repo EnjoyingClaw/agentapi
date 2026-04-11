@@ -2,7 +2,7 @@
 name: x402-image-paywall
 version: 1.0.0
 description: "Use this skill to generate AI images behind an x402 paywall on X Layer. Trigger on: generate image, pay for image, x402 image, AI image generation, image paywall, buy image, USDC image."
-homepage: https://github.com/musangm852/x402-image-paywall
+homepage: https://github.com/EnjoyingClaw/x402-image-paywall
 ---
 
 # x402 Image Paywall
@@ -10,8 +10,8 @@ homepage: https://github.com/musangm852/x402-image-paywall
 Generate AI images by paying 0.50 USDC on X Layer using the x402 payment protocol.
 Built for the OKX Build X Hackathon — Skill Arena track.
 
-**Hosted API:** `https://x402-image-paywall.fly.dev`  
-**Price:** 0.50 USDC per image  
+**Hosted API:** `https://x402-image-paywall-production.up.railway.app`  
+**Price:** 0.05 USDC per image  
 **Network:** X Layer (eip155:196, gas-free)  
 **Image size:** 1024×1024
 
@@ -22,7 +22,7 @@ Built for the OKX Build X Hackathon — Skill Arena track.
 ### Step 1: Send a generate request (will return 402)
 
 ```bash
-curl -X POST https://x402-image-paywall.fly.dev/generate \
+curl -X POST https://x402-image-paywall-production.up.railway.app/generate \
   -H "Content-Type: application/json" \
   -d '{"prompt": "a futuristic city at sunset"}'
 # → HTTP 402, PAYMENT-REQUIRED header contains payment details
@@ -65,7 +65,7 @@ const headerValue = Buffer.from(JSON.stringify(paymentPayload)).toString('base64
 ```
 
 ```bash
-curl -X POST https://x402-image-paywall.fly.dev/generate \
+curl -X POST https://x402-image-paywall-production.up.railway.app/generate \
   -H "Content-Type: application/json" \
   -H "PAYMENT-SIGNATURE: <headerValue>" \
   -d '{"prompt": "a futuristic city at sunset"}'
@@ -80,7 +80,7 @@ curl -X POST https://x402-image-paywall.fly.dev/generate \
 |-------|-------|
 | Network | X Layer (eip155:196) |
 | Token | USDC (`0x74b7f16337b8972027f6196a17a631ac6de26d22`) |
-| Amount | 500000 (= 0.50 USDC, 6 decimals) |
+| Amount | 50000 (= 0.05 USDC, 6 decimals) |
 | Schemes | `aggr_deferred`, `exact` |
 | Gas | Free (X Layer is gas-free) |
 
@@ -125,7 +125,7 @@ Generate an image. Requires x402 payment.
 ## Self-Hosting
 
 ```bash
-git clone https://github.com/musangm852/x402-image-paywall
+git clone https://github.com/EnjoyingClaw/x402-image-paywall
 cd x402-image-paywall
 cp .env.example .env   # fill in your keys
 npm install

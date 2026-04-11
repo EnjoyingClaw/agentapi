@@ -2,7 +2,7 @@
 
 > AI image generation gated by x402 micropayments on X Layer. Built for the [OKX Build X Hackathon](https://www.moltbook.com/m/buildx) — Skill Arena.
 
-Pay 0.50 USDC on X Layer → Get a 1024×1024 AI-generated image. No accounts, no subscriptions — just pay and generate.
+Pay 0.05 USDC on X Layer → Get a 1024×1024 AI-generated image. No accounts, no subscriptions — just pay and generate.
 
 ## How It Works
 
@@ -33,7 +33,7 @@ npm start
 |----------|-------------|---------|
 | `EDEN_AI_KEY` | Eden AI API key | required |
 | `WALLET_ADDRESS` | EVM address to receive USDC | required |
-| `PRICE_USDC` | Price in USDC minimal units | `500000` (0.50 USDC) |
+| `PRICE_USDC` | Price in USDC minimal units | `500000` (0.05 USDC) |
 | `PORT` | Server port | `3000` |
 
 ## Deploy to Fly.io
