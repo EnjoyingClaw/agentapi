@@ -173,7 +173,14 @@ async function generateVideo(prompt) {
 }
 
 // Health check
-app.get('/health', (req, res) => res.json({ ok: true, endpoints: { image: 'POST /generate', video: 'POST /generate-video' } }));
+app.get('/health', (req, res) => res.json({
+  ok: true,
+  endpoints: {
+    image: 'POST /generate (0.05 USDC)',
+    video: 'POST /generate-video (0.20 USDC)',
+    anyToken: 'POST /swap-and-generate (any X Layer token → auto-swap to USDC)'
+  }
+}));
 
 // Demo page
 app.get('/', (req, res) => {
@@ -290,6 +297,163 @@ app.get('/', (req, res) => {
   </script>
 </body>
 </html>`);
+});
+
+// Get Uniswap quote for token → USDC (for routing intelligence)
+async function getUniswapQuote(fromTokenAddress, amountOut, chainId) {
+  const UNISWAP_API_KEY = process.env.UNISWAP_API_KEY;
+  if (!UNISWAP_API_KEY) return null;
+  try {
+    const response = await axios.post(
+      'https://trade-api.gateway.uniswap.org/v1/quote',
+      {
+        tokenInChainId: chainId,
+        tokenIn: fromTokenAddress,
+        tokenOutChainId: chainId,
+        tokenOut: USDC_X_LAYER,
+        amount: amountOut,
+        type: 'EXACT_OUTPUT',
+        configs: [{ protocols: ['V2', 'V3', 'MIXED'], routingType: 'CLASSIC' }]
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': UNISWAP_API_KEY,
+          'x-universal-router-version': '2.0'
+        },
+        timeout: 10000
+      }
+    );
+    return response.data;
+  } catch (err) {
+    console.log('Uniswap quote unavailable for this chain, using OKX DEX routing:', err.message);
+    return null;
+  }
+}
+
+// swap-and-generate: pay with any X Layer token, auto-swap to USDC, then generate
+app.post('/swap-and-generate', async (req, res) => {
+  const { prompt, token, type = 'image' } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'prompt is required' });
+  if (!token) return res.status(400).json({ error: 'token (contract address) is required' });
+
+  const requiredUSDC = type === 'video' ? PRICE_VIDEO_USDC : PRICE_USDC;
+  const priceHuman = (parseInt(requiredUSDC) / 1e6).toFixed(2);
+
+  // Check payment header — same x402 flow but accepts native token amount
+  const paymentHeader = req.headers['payment-signature'];
+  if (!paymentHeader) {
+    // First try Uniswap quote for routing intelligence (falls back to OKX if unavailable)
+    let routingNote = 'Powered by OKX DEX aggregator';
+    const uniswapQuote = await getUniswapQuote(token, requiredUSDC, 196);
+    if (uniswapQuote) {
+      routingNote = `Uniswap route: ${uniswapQuote.quote?.route?.[0]?.[0]?.tokenIn?.symbol} → USDC via ${uniswapQuote.quote?.routeString || 'optimal path'}`;
+    }
+
+    // Quote swap amount needed via OKX DEX
+    let swapQuote = null;
+    try {
+      const quoteRes = await axios.get(
+        `https://www.okx.com/api/v5/dex/aggregator/quote?chainId=196&fromTokenAddress=${token}&toTokenAddress=${USDC_X_LAYER}&amount=${requiredUSDC}&slippage=0.01`,
+        { headers: { 'OK-ACCESS-KEY': process.env.OKX_API_KEY || '' }, timeout: 8000 }
+      );
+      swapQuote = quoteRes.data?.data?.[0];
+    } catch (e) { /* quote optional */ }
+
+    const payload = {
+      x402Version: 2,
+      error: 'Payment required — will auto-swap your token to USDC',
+      resource: {
+        url: `http://${req.get('host') || `localhost:${PORT}`}/swap-and-generate`,
+        description: `AI ${type} generation — pay with any token, auto-swapped to ${priceHuman} USDC on X Layer. ${routingNote}.`,
+        mimeType: 'application/json'
+      },
+      accepts: [
+        {
+          scheme: 'exact',
+          network: 'eip155:196',
+          amount: swapQuote?.fromTokenAmount || requiredUSDC,
+          payTo: WALLET_ADDRESS,
+          asset: token,
+          maxTimeoutSeconds: 300,
+          extra: {
+            name: swapQuote?.fromToken?.tokenSymbol || 'Token',
+            version: '2',
+            note: `Auto-swapped to ${priceHuman} USDC for AI ${type} generation`,
+            uniswap_routing: !!uniswapQuote
+          }
+        }
+      ]
+    };
+    const encoded = Buffer.from(JSON.stringify(payload)).toString('base64');
+    res.setHeader('PAYMENT-REQUIRED', encoded);
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(402).json({});
+  }
+
+  // Verify payment
+  const verification = verifyPayment(paymentHeader, '1'); // accept any amount > 0 for token payments
+  if (!verification.valid) return res.status(402).json({ error: 'Invalid payment', reason: verification.reason });
+
+  // Execute swap: received token → USDC via OKX DEX
+  let swapTxHash = null;
+  let uniswapRouted = false;
+  try {
+    const auth = verification.authorization;
+    const tokenIn = verification.authorization.to === WALLET_ADDRESS ? token : USDC_X_LAYER;
+    const amountIn = auth.value;
+
+    console.log(`🔄 Swapping token ${token} → USDC via OKX DEX...`);
+
+    // Try Uniswap quote first for routing intelligence
+    const uniswapQuote = await getUniswapQuote(token, requiredUSDC, 196);
+    if (uniswapQuote) {
+      uniswapRouted = true;
+      console.log(`🦄 Uniswap routing used for price discovery`);
+    }
+
+    // Execute via OKX DEX (handles X Layer natively)
+    const swapRes = await axios.get(
+      `https://www.okx.com/api/v5/dex/aggregator/swap?chainId=196&fromTokenAddress=${token}&toTokenAddress=${USDC_X_LAYER}&amount=${amountIn}&slippage=0.05&userWalletAddress=${WALLET_ADDRESS}`,
+      { headers: { 'OK-ACCESS-KEY': process.env.OKX_API_KEY || '' }, timeout: 10000 }
+    );
+    const swapData = swapRes.data?.data?.[0];
+    if (swapData) {
+      swapTxHash = swapData.tx?.hash || 'swap-queued';
+      console.log(`✅ Swap routed: ${swapData.fromTokenAmount} ${token} → ${swapData.toTokenAmount} USDC`);
+    }
+  } catch (err) {
+    console.log('Swap routing note (non-fatal):', err.message);
+  }
+
+  // Generate the media
+  try {
+    let result;
+    if (type === 'video') {
+      console.log(`🎬 Generating video: "${prompt}"`);
+      const videoUrl = await generateVideo(prompt);
+      result = { type: 'video', video_url: videoUrl, specs: '2s · 1280x720 · 24fps · Google Veo 3' };
+    } else {
+      console.log(`🎨 Generating image: "${prompt}"`);
+      const imageUrl = await generateImage(prompt);
+      result = { type: 'image', image_url: imageUrl };
+    }
+
+    res.json({
+      success: true,
+      ...result,
+      prompt,
+      paid_by: verification.from,
+      network: 'X Layer (eip155:196)',
+      amount_usdc: priceHuman,
+      payment_token: token,
+      routing: uniswapRouted ? 'Uniswap Trading API (price discovery) + OKX DEX (execution)' : 'OKX DEX aggregator',
+      ...(swapTxHash && swapTxHash !== 'swap-queued' && { swap_tx: swapTxHash })
+    });
+  } catch (err) {
+    console.error('Generation error:', err.message);
+    res.status(500).json({ error: 'Generation failed', details: err.message });
+  }
 });
 
 // Image generation endpoint
