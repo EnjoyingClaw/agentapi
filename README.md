@@ -1,64 +1,96 @@
-# x402 Image Paywall
+# x402 AI Paywall
 
-> AI image generation gated by x402 micropayments on X Layer. Built for the [OKX Build X Hackathon](https://www.moltbook.com/m/buildx) — Skill Arena.
+> One API suite for agent AI tools with pay-per-use on-chain payments.  
+> Built for **OKX Build X Hackathon (Skill Arena)**.
 
-Pay 0.05 USDC on X Layer → Get a 1024×1024 AI-generated image. No accounts, no subscriptions — just pay and generate.
+Your agent should not need humans to manage API keys and billing for every tool.
+This project gives agents a single, consistent interface: request a tool, sign one x402 payment, receive the result.
 
-## How It Works
+## What It Does
 
-```
-Agent sends POST /generate
-        ↓
-Server returns HTTP 402 + PAYMENT-REQUIRED header
-        ↓
-Agent calls: onchainos payment x402-pay --accepts '<...>'
-        ↓
-Agent replays with PAYMENT-SIGNATURE header
-        ↓
-Server verifies payment → calls Eden AI → returns image URL
-```
+### Live endpoints
 
-## Setup
+| Endpoint | Price | Output |
+|---|---:|---|
+| `POST /generate` | `0.05 USDC` | 1024×1024 image |
+| `POST /generate-video` | `0.20 USDC` | 2s, 1280×720, 24fps video |
+| `POST /swap-and-generate` | varies | pay with token input, auto-route to generation |
+
+### Why agents use it
+
+- No subscription lock-in
+- No per-provider API-key setup
+- Usage-based cost model (pay only when needed)
+- Same payment/request pattern across tools
+
+## Chain Support
+
+**Primary:**
+- X Layer (`eip155:196`) — gas-free and preferred path
+
+**Also supported:**
+- Base (`eip155:8453`)
+- Ethereum (`eip155:1`)
+- Arbitrum (`eip155:42161`)
+
+Flow is compatible with **Uniswap AI** patterns for non-X Layer token/payment workflows.
+
+## How the Flow Works
+
+1. Agent calls endpoint (`/generate` or `/generate-video`)
+2. Server returns `HTTP 402` + `PAYMENT-REQUIRED` header (x402 v2)
+3. Agent signs payment with OnchainOS:
+   ```bash
+   onchainos payment x402-pay --accepts '<payload>'
+   ```
+4. Agent replays request with `PAYMENT-SIGNATURE`
+5. Server verifies payment and settles on-chain via EIP-3009 `transferWithAuthorization`
+6. Server returns media URL + transaction reference
+
+## Proof (On-Chain)
+
+- Wallet: `0xe5a24a32eafa471845f658f95118dcdfcc9ecc2a`
+- X Layer tx: https://www.okx.com/web3/explorer/xlayer/tx/0x54a6c05ad7dae2f32eaf1f4c6de923e3907a1608a29f3dbcabf255981ab5f0a5
+- Base tx: `0x763e356071a4f1f3e3e1b9544e584a156d15572287d4037d6c68274920d62171`
+
+## Local Setup
 
 ```bash
 npm install
 cp .env.example .env
-# Edit .env with your keys
+# fill in environment variables
 npm start
 ```
 
 ## Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `EDEN_AI_KEY` | Eden AI API key | required |
-| `WALLET_ADDRESS` | EVM address to receive USDC | required |
-| `PRICE_USDC` | Price in USDC minimal units | `500000` (0.05 USDC) |
-| `PORT` | Server port | `3000` |
+| Variable | Description |
+|---|---|
+| `EDEN_AI_KEY` | Provider API key for generation backend |
+| `WALLET_ADDRESS` | Recipient EVM wallet for payments |
+| `PRICE_USDC` | Image price in minimal units (default `50000`) |
+| `PRICE_VIDEO_USDC` | Video price in minimal units (default `200000`) |
+| `SERVER_PRIVATE_KEY` | Server wallet key used for on-chain redemption |
+| `UNISWAP_API_KEY` | Optional key for Uniswap-compatible routing logic |
+| `PORT` | Server port (default `3000`) |
 
-## Deploy to Fly.io
+## Deploy (Railway)
 
-```bash
-fly launch
-fly secrets set EDEN_AI_KEY=your_key WALLET_ADDRESS=0x...
-fly deploy
-```
+1. Connect this repo in Railway
+2. Set required env vars
+3. Deploy
 
-## Use as an Agent Skill
+Live example:  
+https://x402-image-paywall-production.up.railway.app
 
-See [SKILL.md](./SKILL.md) for full agent integration instructions.
+## Coming Next
 
-```bash
-npx skills add okx/x402-image-paywall
-```
-
-## Tech Stack
-
-- Node.js + Express
-- x402 v2 protocol (PAYMENT-REQUIRED / PAYMENT-SIGNATURE headers)
-- OKX OnchainOS x402 payment skill
-- X Layer (EVM-compatible, gas-free)
-- Eden AI (Replicate image generation)
+Using the same pay-per-use rail:
+- Speech-to-text / text-to-speech
+- OCR + document parsing
+- Detection/moderation endpoints
+- Translation
+- RAG + forecasting
 
 ## License
 
