@@ -38,15 +38,6 @@ function buildPaymentRequired(host) {
     },
     accepts: [
       {
-        scheme: 'aggr_deferred',
-        network: 'eip155:196',
-        amount: PRICE_USDC,
-        payTo: WALLET_ADDRESS,
-        asset: USDC_X_LAYER,
-        maxTimeoutSeconds: 300,
-        extra: { name: 'USD Coin', version: '2' }
-      },
-      {
         scheme: 'exact',
         network: 'eip155:196',
         amount: PRICE_USDC,
@@ -248,12 +239,13 @@ app.post('/generate', async (req, res) => {
       const sig = paymentData.payload.signature;
       const usdc = new ethers.Contract(USDC_X_LAYER, USDC_ABI, serverWallet);
       console.log(`⛓️  Submitting transferWithAuthorization on X Layer...`);
+      console.log(`   from: ${auth.from}, to: ${auth.to}, value: ${auth.value}`);
       const tx = await usdc.transferWithAuthorization(
         auth.from,
         auth.to,
-        auth.value,
-        auth.validAfter,
-        auth.validBefore,
+        BigInt(auth.value),
+        BigInt(auth.validAfter),
+        BigInt(auth.validBefore),
         auth.nonce,
         sig
       );
