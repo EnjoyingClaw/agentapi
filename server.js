@@ -1,6 +1,21 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
+const { ethers } = require('ethers');
+
+// X Layer RPC
+const XLAYER_RPC = 'https://rpc.xlayer.tech';
+const provider = new ethers.JsonRpcProvider(XLAYER_RPC);
+
+// Server wallet (submits redemption txs on-chain)
+const SERVER_PRIVATE_KEY = process.env.SERVER_PRIVATE_KEY;
+const serverWallet = SERVER_PRIVATE_KEY ? new ethers.Wallet(SERVER_PRIVATE_KEY, provider) : null;
+
+// USDC EIP-3009 transferWithAuthorization ABI
+const USDC_ABI = [
+  'function transferWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, bytes calldata signature) external',
+  'function balanceOf(address) view returns (uint256)'
+];
 
 const app = express();
 app.use(express.json());
@@ -224,6 +239,33 @@ app.post('/generate', async (req, res) => {
     return res.status(402).json({ error: 'Invalid payment', reason: verification.reason });
   }
 
+  // Redeem payment on-chain (transferWithAuthorization)
+  let txHash = null;
+  if (serverWallet) {
+    try {
+      const paymentData = JSON.parse(Buffer.from(paymentHeader, 'base64').toString());
+      const auth = paymentData.payload.authorization;
+      const sig = paymentData.payload.signature;
+      const usdc = new ethers.Contract(USDC_X_LAYER, USDC_ABI, serverWallet);
+      console.log(`⛓️  Submitting transferWithAuthorization on X Layer...`);
+      const tx = await usdc.transferWithAuthorization(
+        auth.from,
+        auth.to,
+        auth.value,
+        auth.validAfter,
+        auth.validBefore,
+        auth.nonce,
+        sig
+      );
+      console.log(`⛓️  Tx submitted: ${tx.hash}`);
+      const receipt = await tx.wait();
+      txHash = receipt.hash;
+      console.log(`✅ Tx confirmed: ${txHash}`);
+    } catch (err) {
+      console.error('On-chain redemption failed (proceeding anyway):', err.message);
+    }
+  }
+
   // Generate image
   try {
     console.log(`🎨 Generating image for prompt: "${prompt}"`);
@@ -234,7 +276,8 @@ app.post('/generate', async (req, res) => {
       prompt,
       paid_by: verification.from,
       network: 'X Layer (eip155:196)',
-      amount_usdc: (parseInt(PRICE_USDC) / 1e6).toFixed(2)
+      amount_usdc: (parseInt(PRICE_USDC) / 1e6).toFixed(2),
+      ...(txHash && { tx_hash: txHash, explorer: `https://www.okx.com/web3/explorer/xlayer/tx/${txHash}` })
     });
   } catch (err) {
     console.error('Image generation error:', err.message);
