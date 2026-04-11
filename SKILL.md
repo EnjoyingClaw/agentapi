@@ -11,9 +11,9 @@ Generate AI images by paying 0.50 USDC on X Layer using the x402 payment protoco
 Built for the OKX Build X Hackathon — Skill Arena track.
 
 **Hosted API:** `https://x402-image-paywall-production.up.railway.app`  
-**Price:** 0.05 USDC per image  
-**Network:** X Layer (eip155:196, gas-free)  
-**Image size:** 1024×1024
+**Price:** 0.05 USDC / image · 0.20 USDC / video  
+**Networks:** X Layer (gas-free) · Ethereum · Base · Arbitrum  
+**Uniswap compatible:** Use `pay-with-any-token` skill on Base/Ethereum/Arbitrum  
 
 ---
 
@@ -76,13 +76,26 @@ curl -X POST https://x402-image-paywall-production.up.railway.app/generate \
 
 ## Payment Details
 
-| Field | Value |
-|-------|-------|
-| Network | X Layer (eip155:196) |
-| Token | USDC (`0x74b7f16337b8972027f6196a17a631ac6de26d22`) |
-| Amount | 50000 (= 0.05 USDC, 6 decimals) |
-| Schemes | `aggr_deferred`, `exact` |
-| Gas | Free (X Layer is gas-free) |
+The 402 response includes accepts for all supported chains — pick the one that matches your wallet:
+
+| Chain | Network | USDC Address | Gas |
+|-------|---------|-------------|-----|
+| X Layer | eip155:196 | `0x74b7f16337b8972027f6196a17a631ac6de26d22` | Free |
+| Ethereum | eip155:1 | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | ~$0.50 |
+| Base | eip155:8453 | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | ~$0.001 |
+| Arbitrum | eip155:42161 | `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` | ~$0.01 |
+
+**Amount:** 50000 (= 0.05 USDC, 6 decimals) for images · 200000 (= 0.20 USDC) for video  
+**Scheme:** `exact` (EIP-3009 transferWithAuthorization)  
+
+### Paying with any token (Uniswap)
+
+On Base, Ethereum, or Arbitrum, use the Uniswap `pay-with-any-token` skill to swap any token to USDC before paying:
+
+```bash
+npx skills add uniswap/uniswap-ai
+# Then the skill handles: your token → USDC → PAYMENT-SIGNATURE automatically
+```
 
 ---
 

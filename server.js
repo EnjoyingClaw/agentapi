@@ -3,13 +3,31 @@ const express = require('express');
 const axios = require('axios');
 const { ethers } = require('ethers');
 
-// X Layer RPC
-const XLAYER_RPC = 'https://rpc.xlayer.tech';
-const provider = new ethers.JsonRpcProvider(XLAYER_RPC);
+// Multi-chain providers
+const CHAIN_CONFIG = {
+  196:   { rpc: 'https://rpc.xlayer.tech',            usdc: '0x74b7f16337b8972027f6196a17a631ac6de26d22', name: 'X Layer',  symbol: 'USDC' },
+  1:     { rpc: 'https://eth.llamarpc.com',            usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', name: 'Ethereum', symbol: 'USDC' },
+  8453:  { rpc: 'https://mainnet.base.org',            usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', name: 'Base',     symbol: 'USDC' },
+  42161: { rpc: 'https://arb1.arbitrum.io/rpc',        usdc: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', name: 'Arbitrum', symbol: 'USDC' },
+};
 
-// Server wallet (submits redemption txs on-chain)
+const providers = {};
+for (const [chainId, cfg] of Object.entries(CHAIN_CONFIG)) {
+  providers[chainId] = new ethers.JsonRpcProvider(cfg.rpc);
+}
+
+// Server wallet per chain
 const SERVER_PRIVATE_KEY = process.env.SERVER_PRIVATE_KEY;
-const serverWallet = SERVER_PRIVATE_KEY ? new ethers.Wallet(SERVER_PRIVATE_KEY, provider) : null;
+const serverWallets = {};
+if (SERVER_PRIVATE_KEY) {
+  for (const [chainId, prov] of Object.entries(providers)) {
+    serverWallets[chainId] = new ethers.Wallet(SERVER_PRIVATE_KEY, prov);
+  }
+}
+
+// Keep backward compat
+const provider = providers[196];
+const serverWallet = serverWallets[196];
 
 // USDC EIP-3009 transferWithAuthorization ABI
 const USDC_ABI = [
@@ -25,10 +43,25 @@ const WALLET_ADDRESS = process.env.WALLET_ADDRESS || '0xe5a24a32eafa471845f658f9
 const PRICE_USDC = process.env.PRICE_USDC || '50000';         // 0.05 USDC
 const PRICE_VIDEO_USDC = process.env.PRICE_VIDEO_USDC || '200000'; // 0.20 USDC
 const EDEN_AI_KEY = process.env.EDEN_AI_KEY;
-const USDC_X_LAYER = '0x74b7f16337b8972027f6196a17a631ac6de26d22';
+const USDC_X_LAYER = CHAIN_CONFIG[196].usdc;
 
-// Build x402 v2 payment required payload
+// Build x402 v2 payment required payload — multi-chain accepts
 function buildPaymentRequired(host, price, path, description) {
+  const accepts = Object.entries(CHAIN_CONFIG).map(([chainId, cfg]) => ({
+    scheme: 'exact',
+    network: `eip155:${chainId}`,
+    amount: price,
+    payTo: WALLET_ADDRESS,
+    asset: cfg.usdc,
+    maxTimeoutSeconds: 300,
+    extra: {
+      name: 'USD Coin',
+      version: '2',
+      chain: cfg.name,
+      hint: chainId === '196' ? 'gas-free on X Layer' : `compatible with Uniswap pay-with-any-token on ${cfg.name}`
+    }
+  }));
+
   return {
     x402Version: 2,
     error: 'Payment required',
@@ -37,17 +70,7 @@ function buildPaymentRequired(host, price, path, description) {
       description,
       mimeType: 'application/json'
     },
-    accepts: [
-      {
-        scheme: 'exact',
-        network: 'eip155:196',
-        amount: price,
-        payTo: WALLET_ADDRESS,
-        asset: USDC_X_LAYER,
-        maxTimeoutSeconds: 300,
-        extra: { name: 'USD Coin', version: '2' }
-      }
-    ]
+    accepts
   };
 }
 
@@ -73,12 +96,14 @@ function verifyPayment(paymentHeader, requiredAmount) {
   }
 }
 
-// Redeem payment on-chain via transferWithAuthorization
-async function redeemOnChain(auth, sig) {
-  if (!serverWallet) return null;
+// Redeem payment on-chain via transferWithAuthorization (multi-chain)
+async function redeemOnChain(auth, sig, chainId = 196) {
+  const wallet = serverWallets[chainId];
+  const cfg = CHAIN_CONFIG[chainId];
+  if (!wallet || !cfg) { console.error(`No wallet/config for chainId ${chainId}`); return null; }
   try {
-    const usdc = new ethers.Contract(USDC_X_LAYER, USDC_ABI, serverWallet);
-    console.log(`⛓️  Submitting transferWithAuthorization on X Layer...`);
+    const usdc = new ethers.Contract(cfg.usdc, USDC_ABI, wallet);
+    console.log(`⛓️  Redeeming on ${cfg.name} (chainId ${chainId})...`);
     const tx = await usdc.transferWithAuthorization(
       auth.from, auth.to,
       BigInt(auth.value), BigInt(auth.validAfter), BigInt(auth.validBefore),
@@ -86,12 +111,18 @@ async function redeemOnChain(auth, sig) {
     );
     console.log(`⛓️  Tx submitted: ${tx.hash}`);
     const receipt = await tx.wait();
-    console.log(`✅ Tx confirmed: ${receipt.hash}`);
-    return receipt.hash;
+    console.log(`✅ Tx confirmed on ${cfg.name}: ${receipt.hash}`);
+    return { hash: receipt.hash, chain: cfg.name, chainId };
   } catch (err) {
-    console.error('On-chain redemption failed (proceeding anyway):', err.message);
+    console.error(`On-chain redemption failed on ${cfg.name} (proceeding anyway):`, err.message);
     return null;
   }
+}
+
+// Extract chainId from x402 accepted.network (eip155:196 -> 196)
+function extractChainId(network) {
+  const match = (network || '').match(/eip155:(\d+)/);
+  return match ? parseInt(match[1]) : 196;
 }
 
 // Shared payment gate — returns verification or sends 402
@@ -110,6 +141,12 @@ async function paymentGate(req, res, price, path, description) {
     res.status(402).json({ error: 'Invalid payment', reason: verification.reason });
     return null;
   }
+  // Extract chainId from the accepted network field
+  try {
+    const decoded = JSON.parse(Buffer.from(paymentHeader, 'base64').toString());
+    verification.chainId = extractChainId(decoded.accepted?.network);
+    verification.chainName = CHAIN_CONFIG[verification.chainId]?.name || 'Unknown';
+  } catch { verification.chainId = 196; verification.chainName = 'X Layer'; }
   return verification;
 }
 
@@ -464,16 +501,18 @@ app.post('/generate', async (req, res) => {
   const verification = await paymentGate(req, res, PRICE_USDC, '/generate', 'AI Image Generation — 1 image (1024x1024) via Replicate');
   if (!verification) return;
 
-  const txHash = await redeemOnChain(verification.authorization, verification.signature);
+  const redemption = await redeemOnChain(verification.authorization, verification.signature, verification.chainId);
 
   try {
     console.log(`🎨 Generating image: "${prompt}"`);
     const imageUrl = await generateImage(prompt);
+    const explorerBase = verification.chainId === 196 ? 'https://www.okx.com/web3/explorer/xlayer/tx' : `https://chainid.network/chain/${verification.chainId}`;
     res.json({
       success: true, type: 'image', image_url: imageUrl, prompt,
-      paid_by: verification.from, network: 'X Layer (eip155:196)',
+      paid_by: verification.from,
+      network: `${verification.chainName} (eip155:${verification.chainId})`,
       amount_usdc: (parseInt(PRICE_USDC) / 1e6).toFixed(2),
-      ...(txHash && { tx_hash: txHash, explorer: `https://www.okx.com/web3/explorer/xlayer/tx/${txHash}` })
+      ...(redemption && { tx_hash: redemption.hash, chain: redemption.chain, explorer: `${explorerBase}/${redemption.hash}` })
     });
   } catch (err) {
     console.error('Image error:', err.message);
@@ -489,17 +528,19 @@ app.post('/generate-video', async (req, res) => {
   const verification = await paymentGate(req, res, PRICE_VIDEO_USDC, '/generate-video', 'AI Video Generation — 2s 1280x720 via Google Veo 3');
   if (!verification) return;
 
-  const txHash = await redeemOnChain(verification.authorization, verification.signature);
+  const redemption = await redeemOnChain(verification.authorization, verification.signature, verification.chainId);
 
   try {
     console.log(`🎬 Generating video: "${prompt}"`);
     const videoUrl = await generateVideo(prompt);
+    const explorerBase = verification.chainId === 196 ? 'https://www.okx.com/web3/explorer/xlayer/tx' : `https://chainid.network/chain/${verification.chainId}`;
     res.json({
       success: true, type: 'video', video_url: videoUrl, prompt,
-      paid_by: verification.from, network: 'X Layer (eip155:196)',
+      paid_by: verification.from,
+      network: `${verification.chainName} (eip155:${verification.chainId})`,
       amount_usdc: (parseInt(PRICE_VIDEO_USDC) / 1e6).toFixed(2),
       specs: '2s · 1280x720 · 24fps · Google Veo 3',
-      ...(txHash && { tx_hash: txHash, explorer: `https://www.okx.com/web3/explorer/xlayer/tx/${txHash}` })
+      ...(redemption && { tx_hash: redemption.hash, chain: redemption.chain, explorer: `${explorerBase}/${redemption.hash}` })
     });
   } catch (err) {
     console.error('Video error:', err.message);
