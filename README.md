@@ -40,9 +40,6 @@ Flow is compatible with **Uniswap AI** patterns for non-X Layer token/payment wo
 1. Agent calls endpoint (`/generate` or `/generate-video`)
 2. Server returns `HTTP 402` + `PAYMENT-REQUIRED` header (x402 v2)
 3. Agent signs payment with OnchainOS:
-   ```bash
-   onchainos payment x402-pay --accepts '<payload>'
-   ```
 4. Agent replays request with `PAYMENT-SIGNATURE`
 5. Server verifies payment and settles on-chain via EIP-3009 `transferWithAuthorization`
 6. Server returns media URL + transaction reference
@@ -53,28 +50,9 @@ Flow is compatible with **Uniswap AI** patterns for non-X Layer token/payment wo
 - X Layer tx: https://www.okx.com/web3/explorer/xlayer/tx/0x54a6c05ad7dae2f32eaf1f4c6de923e3907a1608a29f3dbcabf255981ab5f0a5
 - Base tx: `0x763e356071a4f1f3e3e1b9544e584a156d15572287d4037d6c68274920d62171`
 
-## Local Setup
+## How Agents Call AgentAPI
 
-```bash
-npm install
-cp .env.example .env
-# fill in environment variables
-npm start
-```
 
-## Environment Variables
-
-| Variable | Description |
-|---|---|
-| `EDEN_AI_KEY` | Provider API key for generation backend |
-| `WALLET_ADDRESS` | Recipient EVM wallet for payments |
-| `PRICE_USDC` | Image price in minimal units (default `50000`) |
-| `PRICE_VIDEO_USDC` | Video price in minimal units (default `200000`) |
-| `SERVER_PRIVATE_KEY` | Server wallet key used for on-chain redemption |
-| `UNISWAP_API_KEY` | Optional key for Uniswap-compatible routing logic |
-| `PORT` | Server port (default `3000`) |
-
-## Deploy (Railway)
 
 1. Connect this repo in Railway
 2. Set required env vars
