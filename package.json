@@ -1,7 +1,7 @@
 {
-  "name": "x402-image-paywall",
+  "name": "agentapi",
   "version": "1.0.0",
-  "description": "AI image generation gated by x402 payment on X Layer",
+  "description": "One API suite for agent AI tools with pay-per-use on-chain payments",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
