@@ -1,72 +1,91 @@
-# x402 AI Paywall
+# AgentAPI
 
 > One API suite for agent AI tools with pay-per-use on-chain payments.  
 > Built for **OKX Build X Hackathon (Skill Arena)**.
 
 Your agent should not need humans to manage API keys and billing for every tool.
-This project gives agents a single, consistent interface: request a tool, sign one x402 payment, receive the result.
+AgentAPI gives agents a single, consistent interface: request a tool, sign one x402 payment, receive the result.
 
-## What It Does
-
-### Live endpoints
+## Live Endpoints
 
 | Endpoint | Price | Output |
 |---|---:|---|
 | `POST /generate` | `0.05 USDC` | 1024×1024 image |
 | `POST /generate-video` | `0.20 USDC` | 2s, 1280×720, 24fps video |
-| `POST /swap-and-generate` | varies | pay with token input, auto-route to generation |
+| `POST /swap-and-generate` | varies | pay with any token, auto-route to generation |
 
-### Why agents use it
+**Base URL:** `https://x402-image-paywall-production.up.railway.app`
 
-- No subscription lock-in
-- No per-provider API-key setup
-- Usage-based cost model (pay only when needed)
-- Same payment/request pattern across tools
+## How Agents Call AgentAPI
+
+### 1. Request the tool
+
+```bash
+curl -X POST https://x402-image-paywall-production.up.railway.app/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "a blue sunset over mountains"}'
+```
+
+### 2. Receive 402 Payment Required
+
+The server responds with `HTTP 402` and payment requirements in headers:
+- `PAYMENT-REQUIRED` — amount and token
+- `PAYMENT-ACCEPT` — what the agent needs to sign
+
+### 3. Sign payment with Agentic Wallet
+
+```bash
+onchainos payment x402-pay --accepts '<payload>'
+```
+
+### 4. Replay with payment signature
+
+```bash
+curl -X POST https://x402-image-paywall-production.up.railway.app/generate \
+  -H "Content-Type: application/json" \
+  -H "PAYMENT-SIGNATURE: <signature>" \
+  -d '{"prompt": "a blue sunset over mountains"}'
+```
+
+### 5. Receive result
+
+The server returns the media URL + on-chain transaction reference.
 
 ## Chain Support
 
 **Primary:**
-- X Layer (`eip155:196`) — gas-free and preferred path
+- X Layer (`eip155:196`) — gas-free and preferred
 
 **Also supported:**
 - Base (`eip155:8453`)
 - Ethereum (`eip155:1`)
 - Arbitrum (`eip155:42161`)
 
-Flow is compatible with **Uniswap AI** patterns for non-X Layer token/payment workflows.
+Flow is compatible with **Uniswap AI** patterns.
 
-## How the Flow Works
-
-1. Agent calls endpoint (`/generate` or `/generate-video`)
-2. Server returns `HTTP 402` + `PAYMENT-REQUIRED` header (x402 v2)
-3. Agent signs payment with OnchainOS:
-4. Agent replays request with `PAYMENT-SIGNATURE`
-5. Server verifies payment and settles on-chain via EIP-3009 `transferWithAuthorization`
-6. Server returns media URL + transaction reference
-
-## Proof (On-Chain)
+## On-Chain Proof
 
 - Wallet: `0xe5a24a32eafa471845f658f95118dcdfcc9ecc2a`
 - X Layer tx: https://www.okx.com/web3/explorer/xlayer/tx/0x54a6c05ad7dae2f32eaf1f4c6de923e3907a1608a29f3dbcabf255981ab5f0a5
-- Base tx: `0x763e356071a4f1f3e3e1b9544e584a156d15572287d4037d6c68274920d62171`
 
-## How Agents Call AgentAPI
+## Self-Host Deployment
 
+Want to run your own instance?
 
-
-1. Connect this repo in Railway
-2. Set required env vars
-3. Deploy
-
-Live example:  
-https://x402-image-paywall-production.up.railway.app
+```bash
+git clone https://github.com/EnjoyingClaw/agentapi.git
+cd agentapi
+npm install
+cp .env.example .env
+# Fill in EDEN_AI_KEY, WALLET_ADDRESS, SERVER_PRIVATE_KEY
+npm start
+```
 
 ## Coming Next
 
-Using the same pay-per-use rail:
 - Speech-to-text / text-to-speech
 - OCR + document parsing
-- Detection/moderation endpoints
+- Detection/moderation
 - Translation
 - RAG + forecasting
 
